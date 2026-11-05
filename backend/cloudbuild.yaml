@@ -1,0 +1,78 @@
+# GoMax API release: test → image → migrate → deploy.
+# Trigger from the repo root with:
+#   gcloud builds submit --config backend/cloudbuild.yaml --substitutions=_ENV=staging backend
+# (or a Cloud Build trigger on the main branch with the same file, build context backend/).
+substitutions:
+  _REGION: asia-south1
+  _REPO: gomax
+  _SERVICE: gomax-api
+  _ENV: staging
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+steps:
+  - id: install
+    name: node:22
+    entrypoint: npm
+    args: ['ci']
+
+  - id: typecheck
+    name: node:22
+    entrypoint: npm
+    args: ['run', 'typecheck']
+
+  # Runs every API test against an in-memory Postgres (no DB needed here).
+  - id: test
+    name: node:22
+    entrypoint: npm
+    args: ['test']
+
+  - id: image
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$BUILD_ID
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:${_ENV}
+      - .
+
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args: ['push', '--all-tags', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}']
+
+  # Migrations run before the new code takes traffic; a failed migration stops the release.
+  - id: migrate
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        gcloud run jobs update gomax-migrate --region ${_REGION} \
+          --image ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$BUILD_ID
+        gcloud run jobs execute gomax-migrate --region ${_REGION} --wait
+
+  # Zero-downtime release: the new revision starts with 0% traffic. Cloud Run
+  # only marks it ready once its startup probe (/readyz: Supabase + Redis
+  # reachable) passes — otherwise this step fails and users stay on the old one.
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --region=${_REGION}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$BUILD_ID
+      - --no-traffic
+      - --tag=candidate
+
+  - id: shift-traffic
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args: ['run', 'services', 'update-traffic', '${_SERVICE}', '--region=${_REGION}', '--to-latest']
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$BUILD_ID

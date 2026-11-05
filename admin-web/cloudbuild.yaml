@@ -1,0 +1,58 @@
+# GoMax Admin website release: typecheck → build image → deploy to Cloud Run.
+# Run from the repo root:
+#   gcloud builds submit --config admin-web/cloudbuild.yaml \
+#     --substitutions=_ENV=prod,_API_URL=https://api.gomax.app admin-web
+# The API must list this site in CORS_ORIGINS (prod tfvars: https://admin.gomax.in).
+substitutions:
+  _REGION: asia-south1
+  _REPO: gomax
+  _SERVICE: gomax-admin
+  _ENV: staging
+  _API_URL: ''
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+steps:
+  - id: install
+    name: node:22
+    entrypoint: npm
+    args: ['ci']
+
+  - id: typecheck
+    name: node:22
+    entrypoint: npm
+    args: ['run', 'typecheck']
+
+  - id: image
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --build-arg
+      - VITE_API_URL=${_API_URL}
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$BUILD_ID
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:${_ENV}
+      - .
+
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args: ['push', '--all-tags', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}']
+
+  # Public static site; the API checks every login and role.
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$BUILD_ID
+      - --region=${_REGION}
+      - --port=8080
+      - --allow-unauthenticated
+      - --min-instances=0
+      - --max-instances=3
+      - --cpu=1
+      - --memory=256Mi

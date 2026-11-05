@@ -1,0 +1,21 @@
+# Copy to prod.tfvars / staging.tfvars and fill in.
+project_id                = "gomax-prod"
+env                       = "prod"
+region                    = "asia-south1"
+min_instances             = 2             # prod: no cold starts; staging: 0
+max_instances             = 30 # ≈140 req/s each; 20k users ≈ 1,700 req/s (load/README.md)
+db_pool_per_instance      = 5             # 30 × 5 = 150 pooler connections — check your Supabase plan
+redis_tier                = "STANDARD_HA" # staging: "BASIC"
+api_domain                = "api.gomax.app" # empty = no load balancer / Cloud Armor (staging)
+armor_requests_per_minute = 600
+alert_email               = "" # e.g. the tech lead's email
+cors_origins              = "https://admin.gomax.in"
+app_link_base             = "https://gomax.app"
+whatsapp_driver           = "log" # switch to "meta" once templates are approved
+wa_phone_number_id        = ""
+firebase_project_id       = "" # e.g. "gomax-prod" — turns on the sign-up SMS OTP
+payout_mode               = "manual" # "razorpayx" = automatic payouts (fill the 3 Razorpay secrets first)
+kyc_driver                = "mock"   # "razorpay" = real UPI name check through RazorpayX
+razorpayx_account_number  = ""       # RazorpayX → My Account → account number
+payouts_schedule          = "*/10 * * * *"
+# static_egress_ip        = true     # default: on whenever Razorpay is used (IP whitelist)
