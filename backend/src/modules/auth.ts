@@ -191,6 +191,26 @@ const routes: FastifyPluginAsyncZod = async (app) => {
     return { registered: Boolean(u), whatsappNumber: config.WA_BUSINESS_NUMBER };
   });
 
+  // OTP-based password reset: app sends Firebase ID token proving phone ownership.
+  app.post('/reset-otp', { ...strict, schema: { body: z.object({ firebaseToken: z.string().min(20).max(4096), newPassword: Password }) } }, async (req) => {
+    if (!app.deps.verifyPhone) throw badRequest('otp_disabled', 'OTP reset is not enabled on this server');
+    let proof: { mobile: string; firebaseUid: string };
+    try {
+      proof = await app.deps.verifyPhone(req.body.firebaseToken);
+    } catch (e) {
+      if (e instanceof PhoneTokenError) throw new AppError(401, 'otp_invalid', e.message);
+      throw e;
+    }
+    const t = now();
+    return db.transaction(async (tx) => {
+      const [u] = await tx.select({ id: users.id, status: users.status }).from(users).where(eq(users.mobile, proof.mobile));
+      if (!u || u.status !== 'active') throw notFound('Account');
+      await tx.update(users).set({ passwordHash: await hashSecret(req.body.newPassword), failedLogins: 0, lockedUntil: null, updatedAt: t }).where(eq(users.id, u.id));
+      await revokeAllFor(tx, 'user', u.id, t);
+      return { ok: true as const, mobile: proof.mobile };
+    });
+  });
+
   // A1-15/16: helpline call-back. Same answer whether or not the number exists.
   app.post('/reset-request', { ...strict, schema: { body: z.object({ mobile: Mobile }) } }, async (req) => {
     const [u] = await db.select({ id: users.id }).from(users).where(eq(users.mobile, req.body.mobile));

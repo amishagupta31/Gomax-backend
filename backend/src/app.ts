@@ -89,6 +89,8 @@ export async function buildApp(deps: Deps) {
   await app.register(helmet, { global: true });
   await app.register(cors, {
     origin: deps.config.CORS_ORIGINS === '*' ? true : deps.config.CORS_ORIGINS.split(',').map((s) => s.trim()),
+    // The plugin's default leaves out PUT, PATCH and DELETE, which the API uses.
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
   });
   // Per-IP limits (stricter ones are set per route), counted in Redis so they
   // hold across all Cloud Run instances. Off in tests, which make many calls fast.
