@@ -1,10 +1,9 @@
-import { and, desc, eq, isNotNull, sql } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
-import { referralCredits, userKyc, users } from '../db/schema.js';
+import { notifications, referralCredits, userKyc, users } from '../db/schema.js';
 import { badRequest } from '../lib/errors.js';
-import { encrypt, maskPan } from '../lib/crypto.js';
-import { namesMatch, PAN_RE, UPI_RE } from '../lib/kyc.js';
+import { UPI_RE } from '../lib/kyc.js';
 import { getSettings } from '../lib/settings.js';
 import { requireUser } from '../plugins/auth.js';
 import { getUser, homeCounts, kycState, rankView } from '../services/account.js';
@@ -65,12 +64,27 @@ const routes: FastifyPluginAsyncZod = async (app) => {
     },
   );
 
+  // C4-02 Register FCM device token for push notifications.
+  app.post(
+    '/me/device-token',
+    { config: { rateLimit: { max: 10, timeWindow: '1 minute' } }, schema: { body: z.object({ token: z.string().min(10).max(500) }) } },
+    async (req) => {
+      await db.update(users).set({ fcmToken: req.body.token, updatedAt: now() }).where(eq(users.id, req.userId));
+      return { ok: true };
+    },
+  );
+
   // A2/A3 Home: everything the home screen needs in one call.
   app.get('/home', async (req) => {
     const t = now();
     const u = req.currentUser;
     const s = await getSettings(db);
-    const [counts, streak, active] = await Promise.all([homeCounts(db, u.id, t), streakState(db, u.id, t), activeChallenge(db, u.id, t)]);
+    const unreadQ = db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(notifications)
+      .where(and(eq(notifications.userId, u.id), isNull(notifications.readAt)))
+      .then((r) => r[0].n);
+    const [counts, streak, active, unread] = await Promise.all([homeCounts(db, u.id, t), streakState(db, u.id, t), activeChallenge(db, u.id, t), unreadQ]);
     const today = counts.today;
     const kycS = counts.kyc;
     const cards = counts.cards;
@@ -87,7 +101,8 @@ const routes: FastifyPluginAsyncZod = async (app) => {
       streak: { day: streak.current, completed: streak.completed, doneToday: streak.doneToday },
       scratchCardsReady: cards,
       kyc: kycS,
-      withdraw: { minPoints: s.withdraw.minPoints, ready: u.points >= s.withdraw.minPoints && Boolean(kycS.pan && kycS.upi) && !u.cashHold },
+      unreadNotifications: unread,
+      withdraw: { minPoints: s.withdraw.minPoints, ready: u.points >= s.withdraw.minPoints && Boolean(kycS.upi) && !u.cashHold },
       firstCouponDone: Boolean(u.firstCouponAt),
       activeChallenge: active
         ? { id: active.id, title: active.title, progress: active.progress, goal: active.goal, rewardRuns: active.rewardRuns, endsAt: active.endsAt }
@@ -128,29 +143,12 @@ const routes: FastifyPluginAsyncZod = async (app) => {
     };
   });
 
-  // A3-06 Add PAN — government check through the KYC provider; stored encrypted.
-  app.post(
-    '/me/kyc/pan',
-    { config: { rateLimit: { max: 5, timeWindow: '1 minute' } }, schema: { body: z.object({ pan: z.string().trim().toUpperCase(), name: z.string().trim().min(2).max(80) }) } },
-    async (req) => {
-      const pan = req.body.pan.toUpperCase();
-      if (!PAN_RE.test(pan)) throw badRequest('bad_pan', 'Check the PAN number');
-      const r = await kyc.verifyPan(pan, req.body.name);
-      if (!r.ok) throw badRequest('pan_not_verified', r.error);
-      const row = { panEnc: encrypt(pan, config.PAN_KEY), panMasked: maskPan(pan), panName: r.name, panVerifiedAt: now(), updatedAt: now() };
-      await db.insert(userKyc).values({ userId: req.userId, ...row }).onConflictDoUpdate({ target: userKyc.userId, set: row });
-      return { masked: row.panMasked, name: r.name };
-    },
-  );
-
-  // A3-07 Add UPI — check shows the name on the UPI; save requires it to match PAN.
-  const lookupUpi = async (userId: string, upi: string) => {
+  // A3-07 Add UPI — Razorpay validates the UPI ID and returns the registered name.
+  const lookupUpi = async (_userId: string, upi: string) => {
     if (!UPI_RE.test(upi)) throw badRequest('bad_upi', 'Check the UPI ID');
     const r = await kyc.lookupUpi(upi);
     if (!r.ok) throw badRequest('upi_not_found', r.error);
-    const k = await kycState(db, userId);
-    const name = r.name || k.pan?.name || '';
-    return { name, matchesPan: k.pan ? namesMatch(name, k.pan.name) : false, panAdded: Boolean(k.pan) };
+    return { name: r.name || '', matchesPan: true };
   };
 
   app.post(
@@ -164,8 +162,6 @@ const routes: FastifyPluginAsyncZod = async (app) => {
     { config: { rateLimit: { max: 5, timeWindow: '1 minute' } }, schema: { body: z.object({ upiId: z.string().trim().min(4).max(60) }) } },
     async (req) => {
       const r = await lookupUpi(req.userId, req.body.upiId);
-      if (!r.panAdded) throw badRequest('pan_first', 'Add your PAN first');
-      if (!r.matchesPan) throw badRequest('name_mismatch', "Name on UPI doesn't match PAN. Call helpline 92158 44410.");
       const row = { upiId: req.body.upiId, upiName: r.name, upiMatchesPan: true, upiVerifiedAt: now(), updatedAt: now() };
       await db.insert(userKyc).values({ userId: req.userId, ...row }).onConflictDoUpdate({ target: userKyc.userId, set: row });
       return { id: row.upiId, name: r.name };

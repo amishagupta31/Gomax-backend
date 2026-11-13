@@ -58,6 +58,13 @@ const Env = z.object({
    * a Firebase ID token proving the mobile number; when empty, it doesn't (local dev).
    */
   FIREBASE_PROJECT_ID: z.string().optional(),
+  /**
+   * Firebase Admin credentials for FCM push notifications (HTTP v1 API).
+   * On GCP Cloud Run these are optional — Application Default Credentials are used.
+   * Required locally: download a service-account key from Firebase Console.
+   */
+  FIREBASE_CLIENT_EMAIL: z.string().optional(),
+  FIREBASE_PRIVATE_KEY: z.string().optional(),
 
   /** Cloud Scheduler calls /internal/jobs/* with an OIDC token for this audience… */
   JOBS_AUDIENCE: z.string().optional(),
@@ -91,10 +98,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     if (!c.DB_CA_CERT) throw new Error('DB_CA_CERT (Supabase root CA) is required in production');
     if (!c.REDIS_URL) throw new Error('REDIS_URL is required in production (shared rate limits)');
   }
-  if (c.PAYOUT_MODE === 'razorpayx' || c.KYC_DRIVER === 'razorpay') {
+  if (c.KYC_DRIVER === 'razorpay') {
     const missing = (['RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET', 'RAZORPAYX_ACCOUNT_NUMBER'] as const).filter((k) => !c[k]);
-    if (c.PAYOUT_MODE === 'razorpayx' && !c.RAZORPAY_WEBHOOK_SECRET) missing.push('RAZORPAY_WEBHOOK_SECRET' as never);
-    if (missing.length) throw new Error(`Razorpay is switched on but these are missing: ${missing.join(', ')}`);
+    if (missing.length) throw new Error(`KYC_DRIVER=razorpay but these are missing: ${missing.join(', ')}`);
+  }
+  if (c.PAYOUT_MODE === 'razorpayx') {
+    const missing = (['RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET', 'RAZORPAYX_ACCOUNT_NUMBER', 'RAZORPAY_WEBHOOK_SECRET'] as const).filter((k) => !c[k]);
+    if (missing.length) throw new Error(`PAYOUT_MODE=razorpayx but these are missing: ${missing.join(', ')}`);
   }
   if (c.APP_ENV === 'prod' && c.LOADTEST_KEY) throw new Error('LOADTEST_KEY must never be set in prod');
   return c;

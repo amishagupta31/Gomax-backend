@@ -79,6 +79,8 @@ export const users = gomax.table(
     /** Set when the number was proven with an SMS OTP at sign-up (Firebase Phone Auth). */
     phoneVerifiedAt: ts('phone_verified_at'),
     firebaseUid: text('firebase_uid'),
+    /** FCM device token for push notifications; replaced on each app open. */
+    fcmToken: text('fcm_token'),
     createdAt: createdAt(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
   },

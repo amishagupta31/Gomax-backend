@@ -6,6 +6,7 @@ import { createDb } from './db/client.js';
 import { mockKyc, razorpayKyc } from './lib/kyc.js';
 import { razorpayClient } from './lib/razorpay.js';
 import { firebasePhoneVerifier } from './lib/firebase.js';
+import { initFcm } from './lib/fcm.js';
 import { createStore } from './lib/storage.js';
 import { createWhatsApp } from './lib/whatsapp.js';
 
@@ -32,6 +33,11 @@ const razorpay =
   config.RAZORPAY_KEY_ID && config.RAZORPAY_KEY_SECRET && config.RAZORPAYX_ACCOUNT_NUMBER
     ? razorpayClient({ keyId: config.RAZORPAY_KEY_ID, keySecret: config.RAZORPAY_KEY_SECRET, accountNumber: config.RAZORPAYX_ACCOUNT_NUMBER })
     : undefined;
+
+// FCM push — works on Cloud Run via ADC; locally needs FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY.
+if (config.FIREBASE_PROJECT_ID) {
+  initFcm({ projectId: config.FIREBASE_PROJECT_ID, clientEmail: config.FIREBASE_CLIENT_EMAIL, privateKey: config.FIREBASE_PRIVATE_KEY });
+}
 
 const app = await buildApp({
   db,

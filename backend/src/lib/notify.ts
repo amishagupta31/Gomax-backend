@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import type { Db } from '../db/client.js';
 import { notifications, users, waOutbox, type NoteLink } from '../db/schema.js';
+import { sendPush } from './fcm.js';
 
 /**
  * WhatsApp utility templates (C4-03 … C4-14 + D4/D5 status messages).
@@ -21,9 +22,13 @@ export type Note = {
   link?: NoteLink;
 };
 
-/** In-app notification (C4-02). */
+/** In-app notification (C4-02) + FCM push (fire-and-forget). */
 export async function notify(db: Db, userId: string, n: Note) {
   await db.insert(notifications).values({ userId, ...n });
+  // Fire push without blocking the caller — a failed push never fails the operation.
+  db.select({ fcmToken: users.fcmToken }).from(users).where(eq(users.id, userId))
+    .then(([u]) => u?.fcmToken ? sendPush(u.fcmToken, n.title, n.body ?? '', n.link) : undefined)
+    .catch((e: unknown) => console.error('FCM push error:', e));
 }
 
 /** Queue a WhatsApp template; the outbox job sends it (retries, backoff). */
