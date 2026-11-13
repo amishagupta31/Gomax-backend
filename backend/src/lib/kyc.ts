@@ -12,28 +12,19 @@ export interface KycProvider {
   lookupUpi(upi: string): Promise<KycResult>;
 }
 
-/**
- * UPI name check through RazorpayX Fund Account Validation (about ₹2–3 a check).
- * PAN is still format-checked only — pick a PAN provider separately.
- */
+/** UPI name check via Razorpay VPA lookup — 1 API call, no account number needed. */
 export function razorpayKyc(rzp: {
-  createContact: (c: { name: string; mobile: string; referenceId: string }) => Promise<{ id: string }>;
-  createVpaFundAccount: (contactId: string, vpa: string) => Promise<{ id: string }>;
-  validateVpa: (fundAccountId: string) => Promise<{ active: boolean; name: string | null }>;
+  lookupVpa: (vpa: string) => Promise<{ success: boolean; customer_name: string | null }>;
 }): KycProvider {
-  let checkContact: Promise<string> | null = null; // one shared contact for UPI checks
   return {
     verifyPan: mockKyc().verifyPan,
     async lookupUpi(upi) {
       if (!UPI_RE.test(upi)) return { ok: false, error: 'Check the UPI ID' };
       try {
-        checkContact ??= rzp.createContact({ name: 'GoMax UPI check', mobile: '9215844410', referenceId: 'gomax-upi-check' }).then((c) => c.id);
-        const fa = await rzp.createVpaFundAccount(await checkContact, upi);
-        const v = await rzp.validateVpa(fa.id);
-        if (!v.active) return { ok: false, error: 'This UPI ID is not active' };
-        return { ok: true, name: (v.name ?? '').toUpperCase() };
+        const r = await rzp.lookupVpa(upi);
+        if (!r.success) return { ok: false, error: 'This UPI ID is not active' };
+        return { ok: true, name: (r.customer_name ?? '').toUpperCase() };
       } catch {
-        checkContact = null;
         return { ok: false, error: 'Could not check the UPI ID right now. Try again.' };
       }
     },

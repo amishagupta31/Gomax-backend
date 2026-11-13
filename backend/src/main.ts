@@ -30,7 +30,7 @@ const verifyJobToken = config.JOBS_AUDIENCE
   : undefined;
 
 const razorpay =
-  config.RAZORPAY_KEY_ID && config.RAZORPAY_KEY_SECRET && config.RAZORPAYX_ACCOUNT_NUMBER
+  config.RAZORPAY_KEY_ID && config.RAZORPAY_KEY_SECRET
     ? razorpayClient({ keyId: config.RAZORPAY_KEY_ID, keySecret: config.RAZORPAY_KEY_SECRET, accountNumber: config.RAZORPAYX_ACCOUNT_NUMBER })
     : undefined;
 

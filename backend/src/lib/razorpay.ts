@@ -6,8 +6,8 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 export type RazorpayConfig = {
   keyId: string;
   keySecret: string;
-  /** RazorpayX business account number money is paid from. */
-  accountNumber: string;
+  /** RazorpayX business account number — required for payouts, not for UPI lookup. */
+  accountNumber?: string;
   baseUrl?: string;
 };
 
@@ -66,6 +66,10 @@ export function razorpayClient(cfg: RazorpayConfig, fetchImpl: Fetch = fetch) {
 
   return {
     accountNumber: cfg.accountNumber,
+
+    /** Simple UPI VPA lookup — returns the name registered on the UPI ID. No account number needed. */
+    lookupVpa: (vpa: string) =>
+      call<{ vpa: string; success: boolean; customer_name: string | null }>('POST', '/payments/validate/vpa', { value: vpa }),
 
     createContact: (c: { name: string; mobile: string; referenceId: string }) =>
       call<{ id: string }>('POST', '/contacts', {

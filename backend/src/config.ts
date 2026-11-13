@@ -99,7 +99,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     if (!c.REDIS_URL) throw new Error('REDIS_URL is required in production (shared rate limits)');
   }
   if (c.KYC_DRIVER === 'razorpay') {
-    const missing = (['RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET', 'RAZORPAYX_ACCOUNT_NUMBER'] as const).filter((k) => !c[k]);
+    const missing = (['RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET'] as const).filter((k) => !c[k]);
     if (missing.length) throw new Error(`KYC_DRIVER=razorpay but these are missing: ${missing.join(', ')}`);
   }
   if (c.PAYOUT_MODE === 'razorpayx') {

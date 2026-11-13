@@ -11,6 +11,10 @@ export function devRazorpay(log: (msg: string) => void = console.log): RazorpayC
   const byKey = new Map<string, string>();
   return {
     accountNumber: 'DEV-ACCOUNT',
+    async lookupVpa(vpa) {
+      log(`[razorpay-dev] lookupVpa ${vpa} → ok`);
+      return { vpa, success: true, customer_name: 'TEST USER' };
+    },
     async createContact(c) {
       const r = { id: id('cont') };
       log(`[razorpay-dev] contact ${r.id} for ${c.name} (${c.mobile})`);
